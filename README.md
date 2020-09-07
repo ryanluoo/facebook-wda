@@ -10,6 +10,11 @@ Most functions finished.
 
 Since facebook/WebDriverAgent has been archived. Recommend use the forked WDA: https://github.com/appium/WebDriverAgent
 
+Tested with: <https://github.com/appium/WebDriverAgent/tree/v2.16.1>
+
+## Alternatives
+- gwda (Golang): https://github.com/ElectricBubble/gwda
+
 ## Installation
 1. You need to start WebDriverAgent by yourself
 
@@ -88,6 +93,31 @@ c = wda.Client()
 
 A `wda.WDAError` will be raised if communite with WDA went wrong.
 
+**Experiment feature**: create through usbmuxd without `iproxy`
+
+> Added in version: 0.9.0
+
+class `USBClient` inherit from `Client`
+
+USBClient connect to wda-server through `unix:/var/run/usbmuxd`
+
+```python
+import wda
+
+# 如果只有一个设备也可以简写为
+# If there is only one iPhone connecttd
+c = wda.USBClient()
+
+# 支持指定设备的udid，和WDA的端口号
+# Specify udid and WDA port
+c = wda.USBClient("539c5fffb18f2be0bf7f771d68f7c327fb68d2d9", port=8100)
+
+# 也支持通过DEVICE_URL访问
+c = wda.Client("usbmux://{udid}:8100".format(udid="539c5fffb18f2be0bf7f771d68f7c327fb68d2d9"))
+print(c.window_size())
+```
+
+看到这里，可以看 [examples](examples) 目录下的一些代码了 
 
 ### Client
 
@@ -97,6 +127,7 @@ print c.status()
 
 # Wait WDA ready
 c.wait_ready(timeout=300) # 等待300s，默认120s
+c.wait_ready(timeout=300, noprint=True) # 安静的等待，无进度输出
 
 # Press home button
 c.home()
@@ -122,6 +153,9 @@ c.screenshot("screen.jpg") # Bad
 
 # convert to PIL.Image and then save as jpg
 c.screenshot().save("screen.jpg") # Good
+
+c.appium_settings() # 获取appium的配置
+c.appium_settings({"mjpegServerFramerate": 20}) # 修改配置
 ```
 
 ### Session
@@ -192,10 +226,6 @@ s.locked() # locked status, true or false
 s.battery_info() # return like {"level": 1, "state": 2}
 s.device_info() # return like {"currentLocale": "zh_CN", "timeZone": "Asia/Shanghai"}
 
-s.app_current() # current app info
-# return example
-# {"pid": 1281, "name": "", "bundleId": "com.netease.cloudmusic"}
-
 s.set_clipboard("Hello world") # update clipboard
 # s.get_clipboard() # Not working now
 
@@ -251,7 +281,12 @@ s.swipe_down()
 s.tap_hold(x, y, 1.0)
 
 # Hide keyboard (not working in simulator), did not success using latest WDA
-s.keyboard_dismiss()
+# s.keyboard_dismiss()
+
+# press home, volumeUp, volumeDown
+s.press("home") # fater then s.home()
+s.press("volumeUp")
+s.press("volumeDown")
 ```
 
 ### Find element
@@ -307,6 +342,26 @@ s(classChain='**/Button[`name == "URL"`]')
 ```
 
 To see more `Class Chain Queries` examples, view <https://github.com/facebookarchive/WebDriverAgent/wiki/Class-Chain-Queries-Construction-Rules>
+
+### Get Element info
+```python
+e = s(text='Dashboard').get(timeout=10.0)
+
+# get element attributes
+e.className # XCUIElementTypeStaticText
+e.name # XCUIElementTypeStaticText  /name
+e.visible # True    /attribute/visible
+e.value # Dashboard /attribute/value
+e.label # Dashboard /attribute/label
+e.text # Dashboard  /text
+e.enabled # True    /enabled
+e.displayed # True  /displayed
+
+e.bounds # Rect(x=161, y=32, width=53, height=21)  /rect
+x, y, w, h = e.bounds
+
+
+```
 
 ### Element operations (eg: `tap`, `scroll`, `set_text` etc...)
 Exmaple search element and tap
@@ -429,6 +484,60 @@ s.alert.click("设置")
 s.alert.click(["设置", "信任", "安装"]) # when Arg type is list, click the first match, raise ValueError if no match
 ```
 
+Alert monitor
+
+```python
+with c.alert.watch_and_click(['好', '确定']):
+	s(label="Settings").click() # 
+	# ... other operations
+
+# default watch buttons are
+# ["使用App时允许", "好", "稍后", "稍后提醒", "确定", "允许", "以后"]
+with c.alert.watch_and_click(interval=2.0): # default check every 2.0s
+	# ... operations
+```
+
+### Callback
+回调操作: `register_callback`
+
+```python
+c = wda.Client()
+
+# the argument name in callback function can be one of
+# - client: wda.Client
+# - url: str, eg: http://localhost:8100/session/024A4577-2105-4E0C-9623-D683CDF9707E/wda/keys
+# - urlpath: str, eg: /wda/keys  (without session id)
+# - with_session: bool # if url contains session id
+# - method: str, eg: GET
+# - response: dict # Callback.HTTP_REQUEST_AFTER only 
+# - err: WDAError # Callback.ERROR only
+#
+def _cb(client: wda.Client, url: str):
+	if url.endswith("/wda/keys"):
+		print("send_keys called")
+
+c.register_callback(wda.Callback.HTTP_REQUEST_BEFORE, _cb)
+c.send_keys("Hello")
+
+# unregister
+c.unregister_callback(wda.Callback.HTTP_REQUEST_BEFORE, _cb)
+c.unregister_callback(wda.Callback.HTTP_REQUEST_BEFORE) # ungister all
+c.unregister_callback() # unregister all callbacks
+```
+
+支持的回调有
+
+```
+wda.Callback.HTTP_REQUEST_BEFORE
+wda.Callback.HTTP_REQUEST_AFTER
+wda.Callback.ERROR
+```
+
+默认代码内置了两个回调函数 `wda.Callback.ERROR`，使用`c.unregister_callback(wda.Callback.ERROR)`可以去掉这两个回调
+
+- 当遇到`invalid session id`错误时，更新session id并重试
+- 当遇到设备掉线时，等待`wda.DEVICE_WAIT_TIMEOUT`时间 (当前是30s，以后可能会改的更长一些)
+
 ## TODO
 longTap not done pinch(not found in WDA)
 
@@ -448,7 +557,7 @@ s = wda.Client().session()
 def _alert_callback(session):
     session.alert.accept()
 
-s.set_alert_callback(_alert_callback)
+s.set_alert_callback(_alert_callback) # deprecated，此方法不能用了
 
 # do operations, when alert popup, it will auto accept
 s(type="Button").click()
@@ -519,6 +628,10 @@ Source code
 
 - [Router](https://github.com/facebook/WebDriverAgent/blob/master/WebDriverAgentLib/Commands/FBElementCommands.m#L62)
 - [Alert](https://github.com/facebook/WebDriverAgent/blob/master/WebDriverAgentLib/Commands/FBAlertViewCommands.m#L25)
+
+## Thanks
+- https://github.com/msabramo/requests-unixsocket
+- https://github.com/iOSForensics/pymobiledevice
 
 ## Articles
 * <https://testerhome.com/topics/5524> By [diaojunxiam](https://github.com/diaojunxian)

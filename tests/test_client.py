@@ -11,6 +11,7 @@ import xml.etree.ElementTree as ET
 import wda
 from pytest import mark
 
+
 @pytest.fixture(scope="function")
 def client(c):
     c.home()
@@ -36,18 +37,18 @@ def test_client_status(client: wda.Client):
     """
     st = client.status() # json value
     assert st['state'] == 'success'
-    assert 'sessionId' in st
+    # assert 'sessionId' in st
 
 
 def test_client_session_without_argument(client: wda.Client):
     s = client.session('com.apple.Health')
     session_id = client.status()['sessionId']
-    assert s.id == session_id
+    assert s.session_id == session_id
     assert s.bundle_id == 'com.apple.Health'
     s.close()
 
 
-@mark.skip("wda bug")
+@mark.skip("iOS not supported")
 def test_client_session_with_argument(client: wda.Client):
     """
     In mose case, used to open browser with url
@@ -56,6 +57,7 @@ def test_client_session_with_argument(client: wda.Client):
         # time.sleep(1.0)
         # s(id='URL').wait()
         assert s(name='Share', className="Button").wait()
+
 
 def test_client_screenshot(client: wda.Client):
     wda.DEBUG = False
